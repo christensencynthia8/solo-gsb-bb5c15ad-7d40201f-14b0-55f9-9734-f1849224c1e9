@@ -37,6 +37,15 @@
 总分相同时优先入出点偏差更小、再优先 1:1。结果标出**未变 / 新增 / 删除 /
 仅改时 / 文字改动 / 拆分 / 合并**，并排显示两侧时间码与正文，可下载 UTF-8 CSV。
 
+另有 **剪辑字幕重建**工具：输入原 SRT 与 JSON 剪辑数组（每项含非负整数毫秒
+`source_in`、`source_out`、`target_in`，出点须大于入点），片段可**乱序、重复**，
+输出区间可**重叠**，按**原速**把每段素材区间内的字幕**裁切后平移**到目标位置
+（左闭右开求交，空交集丢弃）。按映射后全部端点切分时间轴，每段把当前有效的
+原字幕块按**解析序位**排列、保留各块正文换行并以换行连接；同一原块被多段剪辑
+覆盖时**只显示一次**，直到最后一份覆盖结束才移除。仅合并相邻且有效原块集合
+相同的区间、跳过无字幕区间，导出按时间**从 1 编号的无重叠 SRT**。页面预览
+重建后时间码、原块序位与正文；非法剪辑清单**指出项号并禁止导出**。
+
 后端 Python + FastAPI，前端原生 HTML / CSS / JavaScript（无框架、无构建步骤）。
 
 ---
@@ -298,6 +307,51 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ---
 
+## 剪辑字幕重建
+
+页面顶部切换到「**剪辑字幕重建**」选项卡，可按非线性剪辑的素材片段重建字幕时间轴：
+
+1. 左侧文本框粘贴**原 SRT**（与其它工具同一解析器，保留时间码与正文换行）。
+2. 右侧文本框填写 **JSON 剪辑数组**，每项为一个素材片段：
+
+   ```json
+   [
+     {"source_in": 0,    "source_out": 3000, "target_in": 0},
+     {"source_in": 3000, "source_out": 6000, "target_in": 2000},
+     {"source_in": 0,    "source_out": 3000, "target_in": 1500}
+   ]
+   ```
+
+   - `source_in` / `source_out` / `target_in` 均为**非负整数毫秒**；
+   - **`source_out` 必须大于 `source_in`**（出点大于入点）；
+   - 片段**可乱序、可重复**（同一段素材允许被多次使用），输出（目标）区间
+     **允许重叠**；非法项返回 400 并**指出是第几项**。
+3. 点 **开始重建**，下方表格按时间顺序预览：**新序号、重建后时间码、
+   原块序位**（该时段生效的原 SRT 块解析序位）与**正文**（块内换行保留，
+   多个原块之间再换行连接）。
+4. 点 **下载 SRT** 导出重建结果：按时间**从 1 编号、区间互不重叠**。
+
+### 重建规则
+
+- **原速映射**：素材时间 `s ∈ [source_in, source_out)` 映射到目标时间
+  `target_in + (s − source_in)`，不做变速。
+- **左闭右开求交**：每个字幕块 `[a,b)` 与每段素材区间 `[si,so)` 取交集
+  `[max(a,si), min(b,so))`；**空交集丢弃**（仅端点相触、如 `b == si` 也算空），
+  非空交集裁切后整体平移到目标位置。
+- **端点切分**：收集所有覆盖块映射后的入/出端点切分目标时间轴；每个切片中
+  当前有效的原字幕块按 **SRT 解析序位**（从 1 开始）排列，各块正文保留
+  自身换行，块与块之间用 `\n` 连接。
+- **覆盖计数去重**：同一原块被多段剪辑覆盖时只显示一次——每段覆盖各计一份，
+  重叠处计数叠加，**直到最后一份覆盖结束才移除**；因此覆盖区间重叠/相接处
+  不会重复出现同一正文。
+- **合并与跳过**：仅合并**相邻且有效原块集合相同**的切片（无字幕空隙会阻断
+  合并，不会把字幕铺到没有覆盖的时间段）；**无字幕区间跳过**，不出现在预览
+  与导出中。
+
+错误信息示例：`第 2 项 source_out（50 毫秒）须大于 source_in（50 毫秒）`。
+
+---
+
 ## 人工锚点（强制配对）
 
 自动对齐在个别位置不符合预期时，可人工指定若干锚点把确定对应的两行强行配对：
@@ -377,6 +431,8 @@ curl -s -X POST http://localhost:8000/api/align \
 | POST | `/api/split.en.srt` | 同入参，直接下载英文轨 SRT（保留原时间码与正文行、重新编号） |
 | POST | `/api/diff` | 入参 `{"old_srt","new_srt"}`，返回版本差异 `summary` 与逐行 `rows` |
 | POST | `/api/diff.csv` | 同入参，直接下载差异结果 CSV（UTF-8 带 BOM） |
+| POST | `/api/rebuild` | 入参 `{"srt","clips"}`，返回剪辑字幕重建预览 `summary` 与逐条 `rows` |
+| POST | `/api/rebuild.srt` | 同入参，直接下载重建后的 SRT（按时间从 1 编号、互不重叠） |
 
 `anchors` 为可选的人工锚点数组：`[{"script": 3, "srt": 3}, {"script": 10, "srt": 8}]`，
 元素为解析后 1 起始的「对白稿行序位 / SRT 块序位」，两列须严格递增，
@@ -466,6 +522,25 @@ curl -s -X POST http://localhost:8000/api/diff \
        "new_srt":"1\n00:00:01,500 --> 00:00:02,500\n你好，世界！\n"}'
 ```
 
+剪辑字幕重建接口 `/api/rebuild` 与 `/api/rebuild.srt` 的入参均为
+`{"srt": "...", "clips": [...]}`。`clips` 每项含非负整数毫秒
+`source_in`、`source_out`、`target_in`，且 `source_out > source_in`；
+片段可乱序、重复，目标区间可重叠。任一项非法（缺字段、非整数、为负、
+出点不大于入点、不是对象等）返回 **400** 并指出项号（如 `第 2 项 ...`）。
+预览 `rows` 每条字段：`new_index`（按时间从 1 编号）、
+`start_tc` / `end_tc`（重建后时间码）、`source_indices`（该条所含原字幕块
+的解析序位数组，升序）、`text`（各块正文保留块内换行、块间以 `\n` 连接）；
+`summary` 含 `total`（导出条数）、`clips`（剪辑片段数）、
+`source_blocks`（实际用到的原块数）。所有片段与字幕均不相交时预览为空、
+导出为空 SRT（HTTP 200）。
+
+```bash
+curl -s -X POST http://localhost:8000/api/rebuild \
+  -H 'Content-Type: application/json' \
+  -d '{"srt":"1\n00:00:01,000 --> 00:00:03,000\n你好，世界！\n",
+       "clips":[{"source_in":1000,"source_out":3000,"target_in":0}]}'
+```
+
 快速验证：
 
 ```bash
@@ -482,24 +557,26 @@ curl -s -X POST http://localhost:8000/api/align \
 ```
 .
 ├── app/
-│   ├── main.py        # FastAPI：/api/align、/api/export.csv、/api/retime(.srt)、/api/relayout(.srt)、/api/avoid(.srt)、/api/split(.zh/.en.srt)、/api/diff(.csv)、静态页托管
+│   ├── main.py        # FastAPI：/api/align、/api/export.csv、/api/retime(.srt)、/api/relayout(.srt)、/api/avoid(.srt)、/api/split(.zh/.en.srt)、/api/diff(.csv)、/api/rebuild(.srt)、静态页托管
 │   ├── alignment.py   # 全局单调对齐 DP（numpy 实现 + 纯 Python 回退）
 │   ├── parsers.py     # 逐行对白稿与 SRT 解析（保留时间码与正文行）
 │   ├── retime.py      # SRT 时间轴重定时：校准点分段线性映射与导出校验
 │   ├── relayout.py    # SRT 断行排版：宽度计量、合法断点枚举与最优选点、SRT 导出
 │   ├── avoid.py       # SRT 时间避让：最小最大平移量求解 + 带盒 L1 保序回归就近落位、SRT 导出
 │   ├── split.py       # 双语 SRT 拆轨：错配计分、全段最小总代价 DP（平局逐块中文在上）、单轨 SRT 导出
+│   ├── rebuild.py     # 剪辑字幕重建：素材区间裁切平移、覆盖计数去重、端点切分/同集合合并、SRT 导出
 │   ├── diffalign.py   # SRT 版本差异：1:1/1:2/2:1/缺项全局最小代价 DP（字典序键：总分→入出点偏差→拆并次数）
 │   └── textnorm.py    # 归一化与归一化字符编辑距离
 ├── static/
-│   ├── index.html     # 页面结构（对齐 / 重定时 / 断行排版 / 时间避让 / 双语拆轨 / 版本差异六个选项卡）
+│   ├── index.html     # 页面结构（对齐 / 重定时 / 断行排版 / 时间避让 / 双语拆轨 / 版本差异 / 剪辑重建七个选项卡）
 │   ├── style.css
 │   ├── app.js         # 对齐页面前端交互（fetch 调接口、渲染、下载）
 │   ├── retime.js      # 重定时页面前端交互（含各页签切换）
 │   ├── relayout.js    # 断行排版页面前端交互
 │   ├── avoid.js       # 时间避让页面前端交互
 │   ├── split.js       # 双语拆轨页面前端交互
-│   └── diff.js        # 版本差异审校页面前端交互
+│   ├── diff.js        # 版本差异审校页面前端交互
+│   └── rebuild.js     # 剪辑字幕重建页面前端交互
 ├── tests/             # 单元 + 接口测试
 ├── requirements.txt
 ├── Dockerfile
