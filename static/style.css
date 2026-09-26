@@ -321,6 +321,23 @@ tr.row-added td:first-child { border-left: 4px solid var(--added-border); }
 tr.row-deleted { background: var(--deleted-bg); }
 tr.row-deleted td:first-child { border-left: 4px solid var(--deleted-border); }
 
+/* 剪辑字幕重建 */
+.col-rc-pos { width: 110px; }
+.col-rc-text { min-width: 240px; }
+.pos-tag {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 6px;
+  margin: 0 2px 2px 0;
+  border-radius: 4px;
+  background: var(--anchor-bg);
+  border: 1px solid var(--anchor-border);
+  color: var(--anchor-border);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .hidden { display: none; }
 
 @media (max-width: 860px) {

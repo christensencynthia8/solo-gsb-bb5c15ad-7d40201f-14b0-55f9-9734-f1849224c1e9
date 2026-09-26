@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -14,6 +15,12 @@ from .alignment import GAP_COST, align, align_with_anchors, normalize_anchors
 from .avoid import avoid_subtitles, build_avoid_srt
 from .diffalign import diff_align, time_dev_ms
 from .parsers import parse_script, parse_srt
+from .reconstruct import (
+    MAX_CUTS,
+    build_reconstruct_srt,
+    reconstruct_subtitles,
+    validate_cuts,
+)
 from .relayout import build_relayout_srt, relayout_subtitles
 from .retime import CalibPoint, build_srt, parse_timecode, retime_subtitles
 from .split import SWITCH_COST, build_split_srt, split_subtitles
@@ -660,6 +667,73 @@ def api_diff_csv(req: DiffRequest):
         content=data,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="diff.csv"'},
+    )
+
+
+class ReconstructRequest(BaseModel):
+    srt: str = Field(default="", description="原 SRT 字幕")
+    cuts: Any = Field(
+        default_factory=list,
+        description=(
+            "剪辑数组：每项含非负整数毫秒 source_in/source_out/target_in，"
+            "出点须大于入点；允许乱序、重复、目标区间重叠"
+        ),
+    )
+
+
+def _build_reconstruct_rows(srt_text: str, cuts_raw: Any):
+    if len(srt_text.encode("utf-8", errors="ignore")) > MAX_RAW_BYTES:
+        raise HTTPException(400, "SRT 超过 2 MB 大小限制")
+    try:
+        subs = parse_srt(srt_text)
+    except ValueError as exc:
+        raise HTTPException(400, f"SRT 解析失败：{exc}") from exc
+    if not subs:
+        raise HTTPException(400, "SRT 内容为空，请粘贴字幕")
+    if len(subs) > MAX_ITEMS:
+        raise HTTPException(
+            400, f"字幕块数超过 {MAX_ITEMS} 的上限，请拆分后再重建"
+        )
+    try:
+        cuts = validate_cuts(cuts_raw, max_items=MAX_CUTS)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return reconstruct_subtitles(subs, cuts)
+
+
+def _reconstruct_row_json(r) -> dict:
+    return {
+        "new_index": r.new_index,
+        "start_tc": r.start_tc,
+        "end_tc": r.end_tc,
+        "block_positions": list(r.block_positions),
+        "text": r.text,
+    }
+
+
+@app.post("/api/reconstruct")
+def api_reconstruct(req: ReconstructRequest):
+    rows = _build_reconstruct_rows(req.srt, req.cuts)
+    return {
+        "summary": {
+            "total": len(rows),
+            "cuts": len(req.cuts) if isinstance(req.cuts, list) else 0,
+            "blocks": sum(len(r.block_positions) for r in rows),
+        },
+        "rows": [_reconstruct_row_json(r) for r in rows],
+    }
+
+
+@app.post("/api/reconstruct.srt")
+def api_reconstruct_srt(req: ReconstructRequest):
+    rows = _build_reconstruct_rows(req.srt, req.cuts)
+    data = build_reconstruct_srt(rows).encode("utf-8")
+    return Response(
+        content=data,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="reconstruct.srt"'
+        },
     )
 
 

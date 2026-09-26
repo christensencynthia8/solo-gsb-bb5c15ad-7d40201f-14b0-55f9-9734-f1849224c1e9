@@ -9,7 +9,7 @@
 <body>
 <header class="topbar">
   <h1>字幕校稿对齐</h1>
-  <p class="subtitle">逐行对白稿 × SRT 全局单调对齐 · SRT 时间轴重定时（校准点分段线性映射）· SRT 断行排版（宽度约束下枚举最优断点）· SRT 时间避让（重叠/过近字幕整体平移修整）· 双语 SRT 拆轨（每块两行拆分为中文轨/英文轨）· SRT 版本差异审校（新旧两版按块序最小代价对齐）</p>
+  <p class="subtitle">逐行对白稿 × SRT 全局单调对齐 · SRT 时间轴重定时（校准点分段线性映射）· SRT 断行排版（宽度约束下枚举最优断点）· SRT 时间避让（重叠/过近字幕整体平移修整）· 双语 SRT 拆轨（每块两行拆分为中文轨/英文轨）· SRT 版本差异审校（新旧两版按块序最小代价对齐）· 剪辑字幕重建（素材区间求交裁切、原速平移到目标时间轴）</p>
 </header>
 
 <main>
@@ -20,6 +20,7 @@
     <button type="button" id="tabAvoid" class="tab" data-tab="avoid">SRT 时间避让</button>
     <button type="button" id="tabSplit" class="tab" data-tab="split">双语 SRT 拆轨</button>
     <button type="button" id="tabDiff" class="tab" data-tab="diff">SRT 版本差异审校</button>
+    <button type="button" id="tabReconstruct" class="tab" data-tab="reconstruct">剪辑字幕重建</button>
   </nav>
 
   <div id="viewAlign">
@@ -363,6 +364,58 @@
     </table>
   </section>
   </div><!-- /viewDiff -->
+
+  <div id="viewReconstruct" class="hidden">
+  <section class="input-grid">
+    <div class="pane">
+      <div class="pane-head">
+        <label for="rcSrt">原 SRT 字幕（素材时间码）</label>
+        <button type="button" class="ghost" id="rcSample">填入示例</button>
+      </div>
+      <textarea id="rcSrt" spellcheck="false"
+        placeholder="粘贴标准 SRT&#10;1&#10;00:00:01,000 --> 00:00:03,000&#10;你好，世界！"></textarea>
+    </div>
+    <div class="pane pane-help">
+      <div class="pane-head"><label for="rcCuts">剪辑数组（JSON，单位毫秒）</label></div>
+      <textarea id="rcCuts" spellcheck="false"
+        placeholder='[&#10;  {"source_in": 0, "source_out": 5000, "target_in": 0},&#10;  {"source_in": 8000, "source_out": 12000, "target_in": 5000}&#10;]'></textarea>
+      <ul class="rules">
+        <li>每项含非负整数毫秒 <b>source_in / source_out / target_in</b>，<b>出点须大于入点</b>；区间一律<b>左闭右开</b>。</li>
+        <li>片段可<b>乱序、重复</b>使用，目标区间可<b>重叠</b>，一律按<b>原速</b>映射（目标 = target_in + 源 − source_in）。</li>
+        <li>每个字幕块与每段素材求交，<b>裁切后平移</b>到目标位置，空交集丢弃。</li>
+        <li>同一原块被多段覆盖时<b>只显示一次</b>，直到最后一份覆盖结束才移除；有效块按<b>解析序位</b>排列，保留各块正文换行并以换行连接。</li>
+        <li>仅合并相邻且有效块集合相同的区间，跳过无字幕区间，导出<b>从 1 编号、彼此无重叠</b>的 SRT。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="controls">
+    <button type="button" id="rcRunBtn" class="primary">开始重建</button>
+    <button type="button" id="rcClearBtn" class="ghost">清空</button>
+    <span id="rcStatus" class="status" role="status"></span>
+  </section>
+
+  <section id="rcSummary" class="summary hidden">
+    <span class="chip chip-match">重建字幕 <b id="rcCnt">0</b></span>
+    <span class="chip">剪辑段 <b id="rcCutsShown">0</b></span>
+    <span class="chip">覆盖块次 <b id="rcBlocks">0</b></span>
+    <button type="button" id="rcDownloadBtn" class="ghost">下载 SRT</button>
+  </section>
+
+  <section id="rcResultWrap" class="result-wrap hidden">
+    <table id="rcTable">
+      <thead>
+        <tr>
+          <th class="col-rt-idx">新#</th>
+          <th class="col-tc">目标时间码</th>
+          <th class="col-rc-pos">原块序位</th>
+          <th class="col-rc-text">正文（保留换行）</th>
+        </tr>
+      </thead>
+      <tbody id="rcBody"></tbody>
+    </table>
+  </section>
+  </div><!-- /viewReconstruct -->
 </main>
 
 <script src="/static/app.js"></script>
@@ -371,5 +424,6 @@
 <script src="/static/avoid.js"></script>
 <script src="/static/split.js"></script>
 <script src="/static/diff.js"></script>
+<script src="/static/reconstruct.js"></script>
 </body>
 </html>
